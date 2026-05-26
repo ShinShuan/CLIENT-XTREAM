@@ -179,18 +179,78 @@ function renderStreams() {
 
 function streamUrl(id,ext='ts'){return `${state.serverUrl.replace(/\/+$/,'')}/live/${state.username}/${state.password}/${id}.${ext}`;}
 
+function getExt(item) {
+  // Détection automatique du format depuis les données de l'API ou par extension connue
+  if (item?.container_extension) return item.container_extension;
+  const url = item?.stream_icon || item?.cover || '';
+  const parts = url.split('?')[0].split('.');
+  const ext = parts.length > 1 ? parts.pop().toLowerCase() : '';
+  if (['ts','m3u8','mp4','mkv','avi','mpeg','flv'].includes(ext)) return ext;
+  return 'ts'; // fallback
+}
+
 function openPlayer(id) {
-  const url=streamUrl(id,'ts'), ext=(url.split('?')[0].split('.').pop()||'ts').toLowerCase();
-  const item=(state.streams[state.activeTab]||[]).find(i=>i.stream_id===id);
-  const title=item?.name||item?.title||`Flux #${id}`;
-  const proxyUrl=`${VERCEl_PROXY}?url=${encodeURIComponent(url)}`;
-  $('#playerTitle').textContent=title; $('#playerUrl').textContent=url;
-  if(isAndroid())$('#playVlcBtn').href=`intent://play?url=${encodeURIComponent(url)}#Intent;package=org.videolan.vlc;end`;
-  else if(isIOS())$('#playVlcBtn').href=`vlc://${url}`;
-  else $('#playVlcBtn').href=url;
-  $('#playBrowserBtn').onclick=()=>{$('#playerOverlay').classList.add('hidden');playInBrowser(proxyUrl,ext,url);};
-  $('#copyUrlBtn').onclick=()=>{navigator.clipboard.writeText(url);$('#copyUrlBtn').textContent='✅ Copié !';};
-  $('#closePlayerBtn').onclick=()=>$('#playerOverlay').classList.add('hidden');
+  const items = state.streams[state.activeTab]||[];
+  const item = items.find(i=>i.stream_id===id||i.series_id===id);
+  const title = item?.name||item?.title||`Flux #${id}`;
+  const ext = getExt(item);
+  const url = streamUrl(id, ext);
+  const proxyUrl = `${VERCEl_PROXY}?url=${encodeURIComponent(url)}`;
+  const isLive = state.activeTab === 'live';
+
+  $('#playerTitle').textContent = title;
+  $('#playerUrlLink').textContent = url;
+  $('#playerUrlLink').href = url;
+
+  // Bouton VLC : s'ouvre dans un nouvel onglet (fiable sur tous les OS)
+  const vlcBtn = $('#playVlcBtn');
+  vlcBtn.onclick = (e) => {
+    e.preventDefault();
+    if (isAndroid()) {
+      window.open(`intent://play?url=${encodeURIComponent(url)}#Intent;package=org.videolan.vlc;end`, '_blank');
+    } else {
+      window.open(url, '_blank');
+    }
+  };
+  vlcBtn.style.display = 'flex';
+
+  // Bouton .m3u (playlist pour VLC)
+  document.getElementById('playM3uBtn').onclick = () => {
+    const m3u = `#EXTM3U\n#EXTINF:-1,${title}\n${url}`;
+    const blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${title.replace(/[^a-z0-9]/gi,'_')}.m3u`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  // Bouton navigateur
+  $('#playBrowserBtn').onclick = () => {
+    $('#playerOverlay').classList.add('hidden');
+    playInBrowser(proxyUrl, ext, url);
+  };
+
+  // Copier URL
+  $('#copyUrlBtn').onclick = () => {
+    navigator.clipboard.writeText(url).then(() => {
+      $('#copyUrlBtn').innerHTML = '✅ Copié !';
+      setTimeout(() => {
+        $('#copyUrlBtn').innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copier l'URL`;
+      }, 2000);
+    }).catch(() => {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      $('#copyUrlBtn').textContent = '✅ Copié !';
+    });
+  };
+
+  $('#closePlayerBtn').onclick = () => $('#playerOverlay').classList.add('hidden');
   $('#playerOverlay').classList.remove('hidden');
 }
 
@@ -239,10 +299,18 @@ async function openSeriesEpisodes(seriesId) {
         const proxyUrl=`${VERCEl_PROXY}?url=${encodeURIComponent(url)}`;
         const epTitle=el.querySelector('.episode-title')?.textContent||`Épisode #${epId}`;
         document.getElementById('seriesModal')?.remove();
-        $('#playerTitle').textContent=epTitle; $('#playerUrl').textContent=url;
-        if(isAndroid())$('#playVlcBtn').href=`intent://play?url=${encodeURIComponent(url)}#Intent;package=org.videolan.vlc;end`;
-        else if(isIOS())$('#playVlcBtn').href=`vlc://${url}`;
-        else $('#playVlcBtn').href=url;
+        $('#playerTitle').textContent=epTitle; $('#playerUrlLink').textContent=url; $('#playerUrlLink').href=url;
+        const vlcBtn = $('#playVlcBtn');
+        vlcBtn.onclick = (e) => { e.preventDefault(); window.open(isAndroid() ? `intent://play?url=${encodeURIComponent(url)}#Intent;package=org.videolan.vlc;end` : url, '_blank'); };
+        document.getElementById('playM3uBtn').onclick = () => {
+          const m3u = `#EXTM3U\n#EXTINF:-1,${epTitle}\n${url}`;
+          const blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `${epTitle.replace(/[^a-z0-9]/gi,'_')}.m3u`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        };
         $('#playBrowserBtn').onclick=()=>{$('#playerOverlay').classList.add('hidden');playInBrowser(proxyUrl,ext,url);};
         $('#copyUrlBtn').onclick=()=>{navigator.clipboard.writeText(url);$('#copyUrlBtn').textContent='✅ Copié !';};
         $('#playerOverlay').classList.remove('hidden');

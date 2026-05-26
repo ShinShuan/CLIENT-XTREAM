@@ -3,28 +3,34 @@
    Utilise corsproxy.io pour contourner les limitations CORS.
    ═══════════════════════════════════════════════════════ */
 
-const CORS_PROXIES = [
-  // Essai direct d'abord (serveur peut supporter CORS)
-  u => u,
-  // Proxies CORS publics (fallbacks)
+const PROXY_API = '/api/proxy';
+// Proxies CORS publics (fallbacks si le proxy Vercel échoue)
+const FALLBACK_PROXIES = [
   u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://corsproxy.org/?.${encodeURIComponent(u)}`,
   u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
 ];
-let corsIdx = 0;
 
 async function corsFetch(url) {
-  const proxyFn = CORS_PROXIES[corsIdx % CORS_PROXIES.length];
+  // Essai via proxy Vercel d'abord
   try {
-    const res = await fetch(proxyFn(url));
-    if (!res.ok && corsIdx < CORS_PROXIES.length - 1) { corsIdx++; return corsFetch(url); }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res;
-  } catch (e) {
-    if (corsIdx < CORS_PROXIES.length - 1) { corsIdx++; return corsFetch(url); }
-    throw e;
+    const r = await fetch(`${PROXY_API}?url=${encodeURIComponent(url)}`);
+    if (r.ok) {
+      if (r.headers.get('content-type')?.includes('json')) return r.json();
+      return r;
+    }
+  } catch (_) {}
+  // Fallback proxies CORS
+  for (const fn of FALLBACK_PROXIES) {
+    try {
+      const r = await fetch(fn(url));
+      if (r.ok) {
+        if (r.headers.get('content-type')?.includes('json')) return r.json();
+        return r;
+      }
+    } catch (_) {}
   }
+  throw new Error('Impossible de contacter le serveur (CORS)');
 }
 
 const state = {
@@ -154,7 +160,7 @@ function openPlayer(id) {
   if (isAndroid()) $('#playVlcBtn').href = `intent://play?url=${encodeURIComponent(url)}#Intent;package=org.videolan.vlc;end`;
   else if (isIOS()) $('#playVlcBtn').href = `vlc://${url}`;
   else $('#playVlcBtn').href = url;
-  const proxyUrl = CORS_PROXIES[0](url);
+  const proxyUrl = `${PROXY_API}?url=${encodeURIComponent(url)}`;
   $('#playBrowserBtn').onclick = () => { $('#playerOverlay').classList.add('hidden'); playInBrowser(proxyUrl, ext, url); };
   $('#copyUrlBtn').onclick = () => {
     navigator.clipboard.writeText(url)
@@ -212,7 +218,7 @@ async function openSeriesEpisodes(seriesId) {
         if (isAndroid()) $('#playVlcBtn').href = `intent://play?url=${encodeURIComponent(streamUrl)}#Intent;package=org.videolan.vlc;end`;
         else if (isIOS()) $('#playVlcBtn').href = `vlc://${streamUrl}`;
         else $('#playVlcBtn').href = streamUrl;
-        const proxyUrl = CORS_PROXIES[0](streamUrl);
+        const proxyUrl = `${PROXY_API}?url=${encodeURIComponent(streamUrl)}`;
         $('#playBrowserBtn').onclick = () => { $('#playerOverlay').classList.add('hidden'); playInBrowser(proxyUrl, ext, streamUrl); };
         $('#copyUrlBtn').onclick = () => { navigator.clipboard.writeText(streamUrl).then(()=>$('#copyUrlBtn').textContent='✅ Copié !'); };
         $('#playerOverlay').classList.remove('hidden');

@@ -1,18 +1,31 @@
 /* ═══════════════════════════════════════════════════════
-   Xtream IPTV Client v3 - 100% statique (0 backend)
-   Multiples proxies CORS publics pour les appels API.
-   Lecture VLC : URL directe. Navigateur : via proxy.
+   Xtream IPTV Client v4
+   Proxy Vercel (/api/proxy) comme proxy principal.
+   Fallback proxies CORS publics si besoin.
    ═══════════════════════════════════════════════════════ */
 
-const PROXIES = [
-  u => u,
-  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-];
+const VERCEl_PROXY = '/api/proxy';
 
 async function fetchViaProxy(url) {
-  for (const fn of PROXIES) {
+  // 1) Proxy Vercel (même origine → pas de CORS)
+  try {
+    const res = await fetch(`${VERCEl_PROXY}?url=${encodeURIComponent(url)}`, { mode: 'cors' });
+    if (res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('json')) return res.json();
+      const t = await res.text();
+      try { return JSON.parse(t); } catch { return t; }
+    }
+  } catch (_) {}
+
+  // 2) Fallback CORS proxies
+  const fallbacks = [
+    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  ];
+
+  for (const fn of fallbacks) {
     try {
       const res = await fetch(fn(url), { mode: 'cors' });
       if (res.ok) {
@@ -23,7 +36,8 @@ async function fetchViaProxy(url) {
       }
     } catch (_) {}
   }
-  throw new Error('Connexion impossible (tous les proxies ont échoué)');
+
+  throw new Error('Tous les proxies ont échoué');
 }
 
 const state = {
@@ -49,7 +63,8 @@ async function handleLogin(e) {
   e.preventDefault();
   const srv = $('#serverUrl').value.trim(), usr = $('#username').value.trim(), pwd = $('#password').value.trim();
   if (!srv||!usr||!pwd) return;
-  document.getElementById('loginBtn').disabled = true;
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true;
   $('#loginBtnText').classList.add('hidden');
   $('#loginSpinner').classList.remove('hidden');
   hideError();
@@ -60,18 +75,18 @@ async function handleLogin(e) {
     if (data?.user_info?.auth === 1) {
       state.userInfo = data.user_info; state.serverInfo = data.server_info;
       localStorage.setItem('xt', JSON.stringify({serverUrl:base,username:usr,password:pwd,userInfo:data.user_info,serverInfo:data.server_info}));
-      document.getElementById('loginBtn').disabled = false;
+      btn.disabled = false;
       $('#loginBtnText').classList.remove('hidden');
       $('#loginSpinner').classList.add('hidden');
       enterApp();
     } else {
-      document.getElementById('loginBtn').disabled = false;
+      btn.disabled = false;
       $('#loginBtnText').classList.remove('hidden');
       $('#loginSpinner').classList.add('hidden');
-      showError('Authentification échouée.');
+      showError('Authentification échouée. Vérifiez vos identifiants.');
     }
   } catch(err) {
-    document.getElementById('loginBtn').disabled = false;
+    btn.disabled = false;
     $('#loginBtnText').classList.remove('hidden');
     $('#loginSpinner').classList.add('hidden');
     showError(`Erreur : ${err.message}`);
@@ -168,11 +183,12 @@ function openPlayer(id) {
   const url=streamUrl(id,'ts'), ext=(url.split('?')[0].split('.').pop()||'ts').toLowerCase();
   const item=(state.streams[state.activeTab]||[]).find(i=>i.stream_id===id);
   const title=item?.name||item?.title||`Flux #${id}`;
+  const proxyUrl=`${VERCEl_PROXY}?url=${encodeURIComponent(url)}`;
   $('#playerTitle').textContent=title; $('#playerUrl').textContent=url;
   if(isAndroid())$('#playVlcBtn').href=`intent://play?url=${encodeURIComponent(url)}#Intent;package=org.videolan.vlc;end`;
   else if(isIOS())$('#playVlcBtn').href=`vlc://${url}`;
   else $('#playVlcBtn').href=url;
-  $('#playBrowserBtn').onclick=()=>{$('#playerOverlay').classList.add('hidden');playInBrowser(PROXIES[1](url),ext,url);};
+  $('#playBrowserBtn').onclick=()=>{$('#playerOverlay').classList.add('hidden');playInBrowser(proxyUrl,ext,url);};
   $('#copyUrlBtn').onclick=()=>{navigator.clipboard.writeText(url);$('#copyUrlBtn').textContent='✅ Copié !';};
   $('#closePlayerBtn').onclick=()=>$('#playerOverlay').classList.add('hidden');
   $('#playerOverlay').classList.remove('hidden');
@@ -190,7 +206,10 @@ if(v.canPlayType('application/vnd.apple.mpegurl')){v.src=u;s.remove()}
 else if(typeof Hls!=='undefined'&&Hls.isSupported()){var h=new Hls();h.loadSource(u);h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,function(){s.remove()});h.on(Hls.Events.ERROR,function(e,d){if(d.fatal){s.className='m e';s.innerHTML='<a href=\\"${originalUrl}\\" target=\\"_blank\\">Ouvrir dans VLC</a>'}})}
 else{s.innerHTML='<a href=\\"${originalUrl}\\" target=\\"_blank\\">Ouvrir dans VLC</a>'}
 <\/script>`:
-`<video id="v" controls autoplay playsinline src="${proxyUrl}"></video><div class="m" id="s"><a href="${originalUrl}" target="_blank">Ouvrir dans VLC</a></div><script>document.getElementById('v').addEventListener('error',function(){document.getElementById('s').innerHTML='<a href=\\"${originalUrl}\\" target=\\"_blank\\">Ouvrir dans VLC</a>'})<\/script>`}
+`<video id="v" controls autoplay playsinline src="${proxyUrl}"></video><div class="m" id="s">Chargement...</div><script>
+document.getElementById('v').addEventListener('error',function(){document.getElementById('s').innerHTML='<a href=\\"${originalUrl}\\" target=\\"_blank\\">Ouvrir dans VLC</a>'});
+document.getElementById('v').addEventListener('canplay',function(){document.getElementById('s').remove()});
+<\/script>`}
 </body></html>`);
   win.document.close();
 }
@@ -217,13 +236,14 @@ async function openSeriesEpisodes(seriesId) {
       el.addEventListener('click',()=>{
         const epId=el.dataset.id, ext=el.dataset.ext||'ts';
         const url=`${state.serverUrl.replace(/\/+$/,'')}/series/${state.username}/${state.password}/${epId}.${ext}`;
+        const proxyUrl=`${VERCEl_PROXY}?url=${encodeURIComponent(url)}`;
         const epTitle=el.querySelector('.episode-title')?.textContent||`Épisode #${epId}`;
         document.getElementById('seriesModal')?.remove();
         $('#playerTitle').textContent=epTitle; $('#playerUrl').textContent=url;
         if(isAndroid())$('#playVlcBtn').href=`intent://play?url=${encodeURIComponent(url)}#Intent;package=org.videolan.vlc;end`;
         else if(isIOS())$('#playVlcBtn').href=`vlc://${url}`;
         else $('#playVlcBtn').href=url;
-        $('#playBrowserBtn').onclick=()=>{$('#playerOverlay').classList.add('hidden');playInBrowser(PROXIES[1](url),ext,url);};
+        $('#playBrowserBtn').onclick=()=>{$('#playerOverlay').classList.add('hidden');playInBrowser(proxyUrl,ext,url);};
         $('#copyUrlBtn').onclick=()=>{navigator.clipboard.writeText(url);$('#copyUrlBtn').textContent='✅ Copié !';};
         $('#playerOverlay').classList.remove('hidden');
       });

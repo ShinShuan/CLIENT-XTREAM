@@ -2,9 +2,6 @@
   "buildCommand": null,
   "outputDirectory": ".",
   "framework": null,
-  "rewrites": [
-    { "source": "/api/proxy", "destination": "/api/proxy.edge" }
-  ],
   "headers": [
     {
       "source": "/(.*)",

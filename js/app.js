@@ -166,7 +166,7 @@ function renderStreams() {
   grid.innerHTML=items.map(item=>{
     const name=item.name||item.title||'Sans titre', poster=item.stream_icon||item.cover||'', year=item.year||item.release_date||'', id=item.stream_id??item.series_id??'';
     return `<div class="card" data-id="${id}">${
-      poster?`<img class="card-poster" src="${esc(poster)}" alt="${esc(name)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=\\'card-poster-placeholder\\'>📺</div>'">`:'<div class="card-poster-placeholder">📺</div>'}
+      poster?`<img class="card-poster" src="${proxyUrl(poster)}" alt="${esc(name)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=\\'card-poster-placeholder\\'>📺</div>'">`:'<div class="card-poster-placeholder">📺</div>'}
       <div class="card-play-overlay"><div class="play-icon">▶</div></div>
       <div class="card-body"><div class="card-title">${esc(name)}</div>${year?`<div class="card-sub">${esc(year)}</div>`:''}</div></div>`;
   }).join('');
@@ -177,13 +177,22 @@ function renderStreams() {
   }));
 }
 
-function streamUrl(id) { 
-  return `${state.serverUrl.replace(/\/+$/,'')}/live/${state.username}/${state.password}/${id}.m3u8`; 
-}
+function streamUrl(id, ext='m3u8'){return `${state.serverUrl.replace(/\/+$/,'')}/live/${state.username}/${state.password}/${id}.${ext}`;}
+function proxyUrl(u){return `${VERCEl_PROXY}?url=${encodeURIComponent(u)}`;}
 
 function getExt(item) {
   if (item?.container_extension) return item.container_extension;
-  return 'm3u8'; // HLS par défaut (compatible navigateur + VLC)
+  return 'm3u8';
+}
+
+function downloadM3u(filename, url) {
+  const m3u = `#EXTM3U\n#EXTINF:-1,${filename}\n${url}\n`;
+  const blob = new Blob([m3u], { type: 'application/vnd.apple.mpegurl' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${filename.replace(/[^a-z0-9]/gi,'_')}.m3u`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 function openPlayer(id) {
@@ -192,58 +201,37 @@ function openPlayer(id) {
   const title = item?.name||item?.title||`Flux #${id}`;
   const ext = getExt(item);
   const url = streamUrl(id, ext);
-  const proxyUrl = `${VERCEl_PROXY}?url=${encodeURIComponent(url)}`;
-  const isLive = state.activeTab === 'live';
+  const pUrl = proxyUrl(url);
 
   $('#playerTitle').textContent = title;
   $('#playerUrlLink').textContent = url;
   $('#playerUrlLink').href = url;
 
-  // Bouton VLC : s'ouvre dans un nouvel onglet (fiable sur tous les OS)
+  // VLC bouton : télécharge un .m3u que VLC sait ouvrir
   const vlcBtn = $('#playVlcBtn');
   vlcBtn.onclick = (e) => {
     e.preventDefault();
     if (isAndroid()) {
       window.open(`intent://play?url=${encodeURIComponent(url)}#Intent;package=org.videolan.vlc;end`, '_blank');
     } else {
-      window.open(url, '_blank');
+      downloadM3u(title, url);
     }
   };
-  vlcBtn.style.display = 'flex';
 
-  // Bouton .m3u (playlist pour VLC)
-  document.getElementById('playM3uBtn').onclick = () => {
-    const m3u = `#EXTM3U\n#EXTINF:-1,${title}\n${url}`;
-    const blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${title.replace(/[^a-z0-9]/gi,'_')}.m3u`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
+  // .m3u bouton
+  document.getElementById('playM3uBtn').onclick = () => downloadM3u(title, url);
 
-  // Bouton navigateur
+  // Navigateur via proxy Vercel
   $('#playBrowserBtn').onclick = () => {
     $('#playerOverlay').classList.add('hidden');
-    playInBrowser(proxyUrl, ext, url);
+    playInBrowser(pUrl, ext, url);
   };
 
   // Copier URL
   $('#copyUrlBtn').onclick = () => {
     navigator.clipboard.writeText(url).then(() => {
       $('#copyUrlBtn').innerHTML = '✅ Copié !';
-      setTimeout(() => {
-        $('#copyUrlBtn').innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copier l'URL`;
-      }, 2000);
-    }).catch(() => {
-      // fallback
-      const ta = document.createElement('textarea');
-      ta.value = url;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-      $('#copyUrlBtn').textContent = '✅ Copié !';
+      setTimeout(() => $('#copyUrlBtn').innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copier l'URL`, 2000);
     });
   };
 

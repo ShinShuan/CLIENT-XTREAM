@@ -177,16 +177,13 @@ function renderStreams() {
   }));
 }
 
-function streamUrl(id,ext='ts'){return `${state.serverUrl.replace(/\/+$/,'')}/live/${state.username}/${state.password}/${id}.${ext}`;}
+function streamUrl(id) { 
+  return `${state.serverUrl.replace(/\/+$/,'')}/live/${state.username}/${state.password}/${id}.m3u8`; 
+}
 
 function getExt(item) {
-  // Détection automatique du format depuis les données de l'API ou par extension connue
   if (item?.container_extension) return item.container_extension;
-  const url = item?.stream_icon || item?.cover || '';
-  const parts = url.split('?')[0].split('.');
-  const ext = parts.length > 1 ? parts.pop().toLowerCase() : '';
-  if (['ts','m3u8','mp4','mkv','avi','mpeg','flv'].includes(ext)) return ext;
-  return 'ts'; // fallback
+  return 'm3u8'; // HLS par défaut (compatible navigateur + VLC)
 }
 
 function openPlayer(id) {
